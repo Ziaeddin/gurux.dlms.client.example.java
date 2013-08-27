@@ -5,12 +5,20 @@
 package gurux.dlms.client;
 
 import gurux.dlms.GXDLMSClient;
+import gurux.dlms.GXDLMSException;
 import gurux.dlms.enums.Authentication;
 import gurux.dlms.enums.ObjectType;
 import gurux.dlms.manufacturersettings.GXManufacturer;
 import gurux.dlms.manufacturersettings.GXManufacturerCollection;
+import gurux.dlms.objects.GXDLMSActionSchedule;
 import gurux.dlms.objects.GXDLMSObject;
 import gurux.dlms.objects.GXDLMSObjectCollection;
+import gurux.dlms.objects.GXDLMSProfileGeneric;
+import gurux.dlms.objects.IGXDLMSBase;
+import java.io.BufferedWriter;
+import java.io.FileWriter;
+import java.io.PrintWriter;
+import java.lang.reflect.Array;
 
 public class sampleclient 
 {
@@ -38,18 +46,32 @@ public class sampleclient
         System.out.println("Read LG device using serial port connection.");
         System.out.println("GuruxDlmsSample /m=lgz /sp=COM1 /s=DLMS");
     }
-   
+    
+    static void trace(PrintWriter logFile, String text)
+    {
+        logFile.write(text);
+        System.out.print(text);
+    }
+
+    static void traceLn(PrintWriter logFile, String text)
+    {        
+        logFile.write(text + "\r\n");
+        System.out.print(text + "\r\n");
+    }
+
     /**
      * @param args the command line arguments
      */
     public static void main(String[] args) 
-    {        
+    {   
         // Gurux example server parameters.
         // /m=lgz /h=localhost /p=4060 
         // /m=grx /h=localhost /p=4061
         GXCommunicate com = null;
+        PrintWriter logFile = null;        
         try
         {
+            logFile = new PrintWriter(new BufferedWriter(new FileWriter("logFile.txt")));
             String path = "ManufacturerSettings";
             //Get manufacturer settings from Gurux web service if not installed yet.
             //This is something that you do not nesessary seed. You can 
@@ -62,9 +84,16 @@ public class sampleclient
             // null,
             // InterfaceType.General);
 
-            if (GXManufacturerCollection.isFirstRun(path))
+            try
             {
-                GXManufacturerCollection.updateManufactureSettings(path);
+                if (GXManufacturerCollection.isFirstRun(path))
+                {
+                    GXManufacturerCollection.updateManufactureSettings(path);
+                }
+            }
+            catch(Exception ex)
+            {
+                System.out.println(ex.toString());
             }
             //4059 is Official DLMS port.
             String id = "", host = "", port = "4059", pw = "";
@@ -140,58 +169,76 @@ public class sampleclient
             }            
                                 
             System.out.println("Reading association view");
-            byte[] reply = com.readDataBlock(dlms.getObjects());
-            GXDLMSObjectCollection objects = dlms.parseObjects(reply, true);                        
-            //Read clock.
-            GXDLMSObjectCollection clocks = objects.getObjects(new ObjectType[]{ObjectType.CLOCK});
-            for(GXDLMSObject it : clocks)
+            byte[] reply = com.readDataBlock(dlms.getObjectsRequest());
+            GXDLMSObjectCollection objects = dlms.parseObjects(reply, true);                                                
+            //Read all attributes from all objects.
+            for(GXDLMSObject it : objects)
             {
-                Object val = com.readObject(it, 2);
-                System.out.println(it.getObjectType() + " " + it.toString() + " Value: " + val);
-            }
-            ///////////////////////////////////////////////////////////////////
-            //Get data objects.
-            for(GXDLMSObject it : objects.getObjects(ObjectType.DATA))
-            {
-                Object val = com.readObject(it, 2);
-                if (val == null)
+                if (!(it instanceof IGXDLMSBase))
                 {
-                    System.out.println(it.getObjectType() + " " + it.getLogicalName() + " Value is null.");
+                    //If interface is not implemented.
+                    System.out.println("Unknown Interface: " + it.getObjectType().toString());
+                    continue;
                 }
-                else
+                
+                if (it instanceof GXDLMSProfileGeneric)
                 {
-                    System.out.println(it.getObjectType() + " " + it.getLogicalName() + " Value: " + val + " " + val.getClass());
-                }
-            }
-            ///////////////////////////////////////////////////////////////////
-            //Get register objects.
-            GXDLMSObjectCollection registers = objects.getObjects(new ObjectType[]{ObjectType.REGISTER, ObjectType.EXTENDED_REGISTER, ObjectType.DEMAND_REGISTER, ObjectType.REGISTER_ACTIVATION});
-            for(GXDLMSObject it : registers)
-            {
-                Object val = com.readObject(it, 2);
-                if (val == null)
+                    //Profile generic are read later 
+                    // because it might take so long time
+                    // and this is only a example.
+                    continue;
+                }                
+                traceLn(logFile, "-------- Reading " + 
+                        it.getClass().getSimpleName() + " " + 
+                        it.getDescription());
+                for(int pos : ((IGXDLMSBase) it).GetAttributeIndexToRead())
                 {
-                    System.out.println(it.getObjectType() + " " + it.getLogicalName() + " Value is null.");
-                }
-                else
-                {
-                    System.out.println(it.getObjectType() + " " + it.getLogicalName() + " Value: " + val + " " + val.getClass());
-                }
+                    try
+                    {
+                        Object val = com.readObject(it, pos);
+                        if (val instanceof Object[])
+                        {
+                            String str = "";
+                            for(int pos2 = 0; pos2 != Array.getLength(val); ++pos2)
+                            {
+                                if (str.equals(""))
+                                {
+                                    str += ", ";
+                                }
+                                str += Array.get(val, pos2).toString();
+                            }
+                            val = str;
+                        }
+                        traceLn(logFile, "Index: " + pos + " Value: " + val);                    
+                    }
+                    catch(GXDLMSException ex)
+                    {
+                        //Continue reading if device returns access denied error.
+                        if (ex.getErrorCode() == 3)
+                        {
+                            continue;
+                        }
+                        throw ex;
+                    }
+                }                
             }            
             ///////////////////////////////////////////////////////////////////
             //Get profile generics headers and data.
             Object[] cells;
-            GXDLMSObjectCollection profileGenerics = objects.getObjects(new ObjectType[]{ObjectType.PROFILE_GENERIC});
-            for(Object it : profileGenerics)
-            {                
-                GXDLMSObject pg = (GXDLMSObject) it;
-                GXDLMSObjectCollection columns = com.GetColumns(pg);
-                for(Object it2 : columns)
+            GXDLMSObjectCollection profileGenerics = objects.getObjects(ObjectType.PROFILE_GENERIC);
+            for(GXDLMSObject it : profileGenerics)
+            {               
+                traceLn(logFile, "-------- Reading " + 
+                        it.getClass().getSimpleName() + " " + 
+                        it.getDescription());
+                GXDLMSProfileGeneric pg = (GXDLMSProfileGeneric) it;
+                //Read columns.
+                GXDLMSObject[] columns = (GXDLMSObject[]) com.readObject(pg, 3);
+                for(GXDLMSObject col : columns)
                 {
-                    GXDLMSObject col = (GXDLMSObject) it2;
-                    System.out.print(col.getLogicalName() + " | ");
+                    trace(logFile, col.getLogicalName() + " | ");
                 }
-                System.out.println("");             
+                traceLn(logFile, "");             
                 ///////////////////////////////////////////////////////////////////
                 //Read last day.
                 java.util.Calendar start = java.util.Calendar.getInstance();
@@ -200,8 +247,13 @@ public class sampleclient
                 start.set(java.util.Calendar.SECOND, 0); // set second in minute 
                 start.set(java.util.Calendar.MILLISECOND, 0); 
                 java.util.Calendar end = java.util.Calendar.getInstance();
-                start.add(java.util.Calendar.DATE, -1);                
-                cells = com.readRowsByRange(pg, columns, start.getTime(), end.getTime());
+                start.add(java.util.Calendar.DATE, -1);    
+                GXDLMSObject sorted = pg.getSortObject();
+                if (sorted == null)
+                {
+                    sorted = pg.getCaptureObjects()[0];
+                }
+                cells = com.readRowsByRange(it, sorted, start.getTime(), end.getTime());
                 for(Object rows : cells)
                 {
                     for(Object cell : (Object[]) rows)
@@ -212,33 +264,34 @@ public class sampleclient
                         }
                         else
                         {
-                            System.out.print(cell + " | ");
+                            trace(logFile, cell + " | ");
                         }
                     }
-                    System.out.println("");
+                    traceLn(logFile, "");
                 }
                 
                 ///////////////////////////////////////////////////////////////////
                 //Read first item.
+                traceLn(logFile, "First row");
                 int first = 0;
                 int count = 1;
-                cells = com.readRowsByEntry(pg, columns, first, count);
+                cells = com.readRowsByEntry(pg, first, count);
                 for(Object rows : cells)
                 {
                     for(Object cell : (Object[]) rows)
                     {
                         if (cell instanceof byte[])
                         {
-                            System.out.print(GXDLMSClient.toHex((byte[]) cell) + " | ");
+                            trace(logFile, GXDLMSClient.toHex((byte[]) cell) + " | ");
                         }
                         else
                         {
-                            System.out.print(cell + " | ");
+                            trace(logFile, cell + " | ");
                         }
                     }
-                    System.out.println("");
+                    traceLn(logFile, "");
                 }                
-            }            
+            }       
         }
         catch(Exception ex)
         {            
@@ -246,6 +299,10 @@ public class sampleclient
         }
         finally
         {
+            if (logFile != null)
+            {
+                logFile.close();
+            }            
             try
             {
                 ///////////////////////////////////////////////////////////////

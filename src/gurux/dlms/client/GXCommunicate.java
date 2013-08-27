@@ -14,12 +14,15 @@ import gurux.dlms.GXDLMSClient;
 import gurux.dlms.GXDLMSException;
 import gurux.dlms.enums.ObjectType;
 import gurux.dlms.manufacturersettings.*;
+import gurux.dlms.objects.GXDLMSCaptureObject;
 import gurux.dlms.objects.GXDLMSObject;
 import gurux.dlms.objects.GXDLMSObjectCollection;
 import gurux.net.GXNet;
 import gurux.net.NetworkType;
 import java.io.ByteArrayOutputStream;
+import java.util.AbstractMap;
 import java.util.Date;
+import java.util.List;
 
 public class GXCommunicate
 {
@@ -410,13 +413,13 @@ public class GXCommunicate
     {
         byte[] data = dlms.read(item.getName(), item.getObjectType(), attributeIndex)[0];
         data = readDataBlock(data);
-        return dlms.getValue(data, item.getObjectType(), item.getLogicalName(), attributeIndex);
+        return dlms.updateValue(data, item, attributeIndex);
     }
 
     /*
      * Returns columns of profile Generic.
      */
-    public GXDLMSObjectCollection GetColumns(GXDLMSObject pg) throws Exception
+    public List<AbstractMap.SimpleEntry<GXDLMSObject, GXDLMSCaptureObject>> GetColumns(GXDLMSObject pg) throws Exception
     {
         Object entries = readObject(pg, 7);
         GXObisCode code = manufacturer.getObisCodes().findByLN(pg.getObjectType(), pg.getLogicalName(), null);
@@ -441,114 +444,26 @@ public class GXCommunicate
      * @return
      * @throws Exception
      */
-    public Object[] readRowsByEntry(GXDLMSObject pg, GXDLMSObjectCollection columns, int index, int count) throws Exception
+    public Object[] readRowsByEntry(GXDLMSObject pg, int index, int count) throws Exception
     {
         byte[] data = dlms.readRowsByEntry(pg.getName(), index, count);
-        data = readDataBlock(data);        
-        Object[] rows = (Object[]) dlms.getValue(data);
-        if (columns != null && rows.length != 0 && dlms.getObisCodes() != null)
-        {
-            Object[] row = (Object[]) rows[0];
-            if (columns.size() != row.length)
-            {
-                throw new Exception("Columns count do not mach.");
-            }
-            for (int pos = 0; pos != columns.size(); ++pos)
-            {
-                if (row[pos] instanceof byte[])
-                {
-                    DataType type = DataType.NONE;
-                    //Find Column type
-                    GXDLMSObject col = columns.get(pos);
-                    GXObisCode code = dlms.getObisCodes().findByLN(col.getObjectType(), col.getLogicalName(), null);
-                    if (code != null)
-                    {
-                        GXDLMSAttributeSettings att = code.getAttributes().find(col.getSelectedAttributeIndex());
-                        if (att != null)
-                        {
-                            type = att.getUIType();                            
-                        }
-                        if (type == DataType.NONE)
-                        {
-                            int attributeIndex = col.getSelectedAttributeIndex();
-                            if((col.getObjectType() == ObjectType.CLOCK && attributeIndex == 2) ||
-                                (col.getObjectType() == ObjectType.EXTENDED_REGISTER && attributeIndex == 5))
-                            {
-                                type = DataType.DATETIME;
-                            }
-                        }
-                        if (type != DataType.NONE)
-                        {
-                            for(Object it : rows)
-                            {
-                                Object[] cells = (Object[]) it;
-                                cells[pos] = GXDLMSClient.changeType((byte[]) cells[pos], type);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        return rows;
+        data = readDataBlock(data);
+        return (Object[])dlms.updateValue(data, pg, 2);        
     }
 
     /**
      * Read Profile Generic's data by range (start and end time).
      * @param pg
-     * @param columns
+     * @param sortedItem
      * @param start
      * @param end
      * @return
      * @throws Exception
      */
-    public Object[] readRowsByRange(GXDLMSObject pg, GXDLMSObjectCollection columns, Date start, Date end) throws Exception
+    public Object[] readRowsByRange(GXDLMSObject pg, GXDLMSObject sortedItem, Date start, Date end) throws Exception
     {
-        byte[] data = dlms.readRowsByRange(pg.getName(), columns.get(0).getLogicalName(), pg.getObjectType(), columns.get(0).getVersion(), start, end);
+        byte[] data = dlms.readRowsByRange(pg.getName(), sortedItem.getLogicalName(), pg.getObjectType(), sortedItem.getVersion(), start, end);
         data = readDataBlock(data);
-        Object[] rows = (Object[]) dlms.getValue(data);
-        if (rows.length != 0 && dlms.getObisCodes() != null)
-        {
-            Object[] row = (Object[]) rows[0];
-            if (columns.size() != row.length)
-            {
-                throw new Exception("Columns count do not mach.");
-            }
-            for (int pos = 0; pos != columns.size(); ++pos)
-            {
-                if (row[pos] instanceof byte[])
-                {
-                    DataType type = DataType.NONE;
-                    //Find Column type
-                    GXDLMSObject col = columns.get(pos);
-                    GXObisCode code = dlms.getObisCodes().findByLN(col.getObjectType(), col.getLogicalName(), null);
-                    if (code != null)
-                    {
-                        GXDLMSAttributeSettings att = code.getAttributes().find(col.getSelectedAttributeIndex());
-                        if (att != null)
-                        {
-                            type = att.getUIType();                            
-                        }
-                        if (type == DataType.NONE)
-                        {
-                            int attributeIndex = col.getSelectedAttributeIndex();
-                            if((col.getObjectType() == ObjectType.CLOCK && attributeIndex == 2) ||
-                                (col.getObjectType() == ObjectType.EXTENDED_REGISTER && attributeIndex == 5))
-                            {
-                                type = DataType.DATETIME;
-                            }
-                        }
-                        if (type != DataType.NONE)
-                        {
-                            for(Object it : rows)
-                            {
-                                Object[] cells = (Object[]) it;
-                                cells[pos] = GXDLMSClient.changeType((byte[]) cells[pos], type);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        return rows;
+        return (Object[])dlms.updateValue(data, pg, 2);        
     }
 }
