@@ -415,6 +415,19 @@ public class GXCommunicate
         data = readDataBlock(data);
         return dlms.updateValue(data, item, attributeIndex);
     }
+    
+     /**
+     * Writes value to DLMS object with selected attribute index.
+     * @param item
+     * @param attributeIndex
+     * @return
+     * @throws Exception
+     */
+    public void writeObject(GXDLMSObject item, int attributeIndex) throws Exception
+    {
+        byte[] data = dlms.write(item, attributeIndex)[0];
+        readDataBlock(data);       
+    }
 
     /*
      * Returns columns of profile Generic.

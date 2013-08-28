@@ -131,6 +131,7 @@ publish/
 # NuGet Packages Directory
 ## TODO: If you have NuGet Package Restore enabled, uncomment the next line
 #packages/
+ManufacturerSettings/
 
 # Windows Azure Build Output
 csx
@@ -213,3 +214,4 @@ pip-log.txt
 
 #Mr Developer
 .mr.developer.cfg
+/nbproject/private/
