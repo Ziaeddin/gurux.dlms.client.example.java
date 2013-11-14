@@ -1,24 +1,54 @@
-/*
- * To change this template, choose Tools | Templates
- * and open the template in the editor.
- */
+//
+// --------------------------------------------------------------------------
+//  Gurux Ltd
+// 
+//
+//
+// Filename:        $HeadURL$
+//
+// Version:         $Revision$,
+//                  $Date$
+//                  $Author$
+//
+// Copyright (c) Gurux Ltd
+//
+//---------------------------------------------------------------------------
+//
+//  DESCRIPTION
+//
+// This file is a part of Gurux Device Framework.
+//
+// Gurux Device Framework is Open Source software; you can redistribute it
+// and/or modify it under the terms of the GNU General Public License 
+// as published by the Free Software Foundation; version 2 of the License.
+// Gurux Device Framework is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of 
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. 
+// See the GNU General Public License for more details.
+//
+// More information of Gurux products: http://www.gurux.org
+//
+// This code is licensed under the GNU General Public License v2. 
+// Full text may be retrieved at http://www.gnu.org/licenses/gpl-2.0.txt
+//---------------------------------------------------------------------------
+
 package gurux.dlms.client;
 
 import gurux.common.IGXMedia;
 import gurux.common.ReceiveParameters;
 import gurux.dlms.enums.RequestTypes;
 import gurux.dlms.enums.InterfaceType;
-import gurux.dlms.enums.DataType;
 import gurux.dlms.enums.Authentication;
 import gurux.dlms.GXDLMSClient;
 import gurux.dlms.GXDLMSException;
-import gurux.dlms.enums.ObjectType;
 import gurux.dlms.manufacturersettings.*;
 import gurux.dlms.objects.GXDLMSCaptureObject;
 import gurux.dlms.objects.GXDLMSObject;
-import gurux.dlms.objects.GXDLMSObjectCollection;
 import gurux.net.GXNet;
 import gurux.net.NetworkType;
+import gurux.serial.GXSerial;
+import gurux.io.Parity;
+import gurux.io.StopBits;
 import java.io.ByteArrayOutputStream;
 import java.util.AbstractMap;
 import java.util.Date;
@@ -35,8 +65,9 @@ public class GXCommunicate
     java.nio.ByteBuffer replyBuff;
     int WaitTime = 0;
 
-    public GXCommunicate(int waitTime, gurux.dlms.GXDLMSClient dlms, GXManufacturer manufacturer, boolean iec, Authentication auth, String pw) throws Exception
+    public GXCommunicate(int waitTime, gurux.dlms.GXDLMSClient dlms, GXManufacturer manufacturer, boolean iec, Authentication auth, String pw, IGXMedia media) throws Exception
     {             
+        Media = media;
         WaitTime = waitTime;
         this.dlms = dlms;
         this.manufacturer = manufacturer;
@@ -51,7 +82,7 @@ public class GXCommunicate
         val = GXManufacturer.countServerAddress(serv.getHDLCAddress(), serv.getPhysicalAddress(), serv.getLogicalAddress());        
         dlms.setServerID(val);
         dlms.setAuthentication(auth);
-        dlms.setPassword(pw);        
+        dlms.setPassword(pw.getBytes("ASCII"));        
         System.out.println("Authentication: " + auth);
         System.out.println("ClientID: 0x" + Integer.toHexString(Integer.parseInt(dlms.getClientID().toString())));
         System.out.println("ServerID: 0x" + Integer.toHexString(Integer.parseInt(dlms.getServerID().toString())));
@@ -92,8 +123,8 @@ public class GXCommunicate
             eop = null;
         }
         Integer pos = 0;
-        boolean succeeded = false;
-        ReceiveParameters<byte[]> p = new ReceiveParameters<>(byte[].class);
+        boolean succeeded = false;        
+	ReceiveParameters<byte[]> p = new ReceiveParameters<byte[]>(byte[].class);
         p.setAllData(true);
         p.setEop(eop);
         p.setCount(5);
@@ -139,9 +170,24 @@ public class GXCommunicate
         Object[][] errors = dlms.checkReplyErrors(data, p.getReply());
         if (errors != null)
         {
-            throw new GXDLMSException((int) errors[0][0]);
+            throw new GXDLMSException((Integer) errors[0][0]);
         }
         return p.getReply();       
+    }
+    
+    static String toHex(byte[] bytes) 
+    {
+        final char[] hexArray = {'0','1','2','3','4','5','6','7','8','9','A','B','C','D','E','F'};
+        char[] hexChars = new char[bytes.length * 3];
+        int tmp;
+        for (int pos = 0; pos != bytes.length; ++pos) 
+        {
+            tmp = bytes[pos] & 0xFF;
+            hexChars[pos * 3] = hexArray[tmp >> 4];
+            hexChars[pos * 3 + 1] = hexArray[tmp & 0x0F];
+            hexChars[pos * 3 + 2] = ' ';
+        }
+        return new String(hexChars);
     }
     
     /**
@@ -166,7 +212,8 @@ public class GXCommunicate
      * @return
      * @throws Exception
      */
-    byte[] readDataBlock(byte[] data) throws Exception
+    @SuppressWarnings("unused")
+	byte[] readDataBlock(byte[] data) throws Exception
     {
         if (data.length == 0)
         {
@@ -179,7 +226,7 @@ public class GXCommunicate
         //If there is nothing to send.
         if (allData == null)
         {
-            return null;
+            return new byte[0];
         }
         int maxProgress = dlms.getMaxProgressStatus(allData);        
         int lastProgress = 0;
@@ -250,156 +297,148 @@ public class GXCommunicate
     }
 
     /**
-     * Initializes serial connection.
+     * Initializes connection.
      * @param port
      * @throws Exception
      */
-    /*
-    void initializeSerial(String port) throws Exception
-    {        
-        Enumeration portList = CommPortIdentifier.getPortIdentifiers();
-	while (portList.hasMoreElements())
-        {
-	    CommPortIdentifier portId = (CommPortIdentifier) portList.nextElement();
-            System.out.println(portId.getName());
-	    if (portId.getPortType() == CommPortIdentifier.PORT_SERIAL &&
-                    portId.getName().equalsIgnoreCase(port))
-            {
-                serial = (SerialPort) portId.open(this.getClass().getName(), 2000);
-                if (iec)
-                {
-                    serial.setSerialPortParams(300, SerialPort.DATABITS_7,
-					   SerialPort.STOPBITS_1,
-					   SerialPort.PARITY_EVEN);
-                }
-                else
-                {
-                    serial.setSerialPortParams(9600, SerialPort.DATABITS_8,
-					   SerialPort.STOPBITS_1,
-					   SerialPort.PARITY_NONE);
-                }
-            }
-        }
-	if (serial == null)
-        {
-	    throw new Exception("Port " + port + " not found.");
-	}
-        if (iec)
-        {
-            int Terminator = '\n';
-            String dataStr = "/?!\r\n";
-            String replyStr = new String(this.send(dataStr.getBytes("ASCII"), Terminator));
-            //If echo is used.
-            if (replyStr.equals(dataStr))
-            {
-                replyStr = new String(this.send(dataStr.getBytes("ASCII"), Terminator));
-            }
-            System.out.println("IEC received: " + replyStr);
-            if (replyStr.length() == 0 || replyStr.charAt(0) != '/')
-            {
-                throw new Exception("Invalid responce.");
-            }
-            String manufactureID = replyStr.substring(1, 3);
-            if (manufacturer.getIdentification().compareToIgnoreCase(manufactureID) != 0)
-            {
-                throw new Exception("Manufacturer " + manufacturer.getIdentification() + " expected but " + manufactureID + " found.");
-            }
-            char baudrate = replyStr.charAt(4);
-            int bitrate = 0;
-            switch (baudrate)
-            {
-                case '0':
-                    bitrate = 300;
-                    break;
-                case '1':
-                    bitrate = 600;
-                    break;
-                case '2':
-                    bitrate = 1200;
-                    break;
-                case '3':
-                    bitrate = 2400;
-                    break;
-                case '4':
-                    bitrate = 4800;
-                    break;
-                case '5':
-                    bitrate = 9600;
-                    break;
-                case '6':
-                    bitrate = 19200;
-                    break;
-                default:
-                    throw new Exception("Unknown baud rate.");
-            }
-            System.out.println("Bitrate is : " + bitrate);
-            //Send ACK
-            //Send Protocol control character
-            byte controlCharacter = (byte)'2';// "2" HDLC protocol procedure (Mode E)
-            //Send Baudrate character
-            //Mode control character
-            byte ModeControlCharacter = (byte)'2';//"2" //(HDLC protocol procedure) (Binary mode)
-            //Set mode E.
-            byte[] tmp = new byte[] { 0x06, controlCharacter, (byte)baudrate, ModeControlCharacter, 13, 10 };
-            this.send(tmp, null);
-            serial.setSerialPortParams(bitrate, SerialPort.DATABITS_8,
-                                       SerialPort.STOPBITS_1,
-                                       SerialPort.PARITY_NONE);
-        }
-        ConnectionStartTime = java.util.Calendar.getInstance().getTimeInMillis();
-        byte[] reply = null;
-        byte[] data = dlms.SNRMRequest();
-        if (data != null)
-        {
-            reply = readDLMSPacket(data);
-            //Has server accepted client.
-            dlms.parseUAResponse(reply);
-        }
-        //Generate AARQ request.
-        //Split requests to multible packets if needed.
-        //If password is used all data might not fit to one packet.
-        for (byte[] it : dlms.AARQRequest(null))
-        {            
-            reply = readDLMSPacket(it);
-        }
-        //Parse reply.
-        dlms.parseAAREResponse(reply);
-    }
-    * */
-
-    /**
-     * Initializes TCP/IP connection.
-     * @param host
-     * @param port
-     * @throws Exception
-     */
-    void initializeSocket(String host, int port) throws Exception
-    {
-        close();
-        Media = new GXNet(NetworkType.TCP, host, port);
+    void initializeConnection() throws Exception
+    {       
         Media.open();
-        byte[] reply = null;
-        byte[] data = dlms.SNRMRequest();
-        //This is ignored if IEC 62056-47 is used.
-        if (data.length != 0)
+        if (Media instanceof GXSerial)
         {
-            reply = readDLMSPacket(data);
-            //Has server accepted client.
-            dlms.parseUAResponse(reply);
-            //Allocate buffer to same size as transmit buffer of the meter.
-            //Size of replyBuff is payload and frame (Bop, EOP, crc).            
-            int size = (int) ((((Number)dlms.getLimits().getMaxInfoTX()).intValue() & 0xFFFFFFFFL) + 40);
-            replyBuff = java.nio.ByteBuffer.allocate(size);
+            if (iec)
+            {
+                ReceiveParameters<byte[]> p = new ReceiveParameters<byte[]>(byte[].class);
+                p.setAllData(false);
+                p.setEop((byte) '\n');
+                p.setWaitTime(WaitTime);
+                String data;
+                String replyStr;
+                synchronized (Media.getSynchronous())
+                {
+                    data = "/?!\r\n";
+                    if (Trace)
+                    {   
+                        System.out.println("<- " + GXDLMSClient.toHex(data.getBytes("ASCII")));
+                    }
+                    Media.send(data, null);
+                    if (!Media.receive(p))
+                    {
+                        throw new Exception("Invalid meter type.");                    
+                    }
+                    if (Trace)
+                    {   
+                        System.out.println("-> " + GXDLMSClient.toHex(p.getReply()));
+                    }
+                    //If echo is used.
+                    replyStr = new String(p.getReply());
+                    if (data.equals(replyStr))
+                    {
+                        if (!Media.receive(p))
+                        {
+                            throw new Exception("Invalid meter type.");                    
+                        }
+                        if (Trace)
+                        {   
+                            System.out.println("-> " + GXDLMSClient.toHex(p.getReply()));
+                        }
+                        replyStr = new String(p.getReply());
+                    }
+                }
+                if (replyStr.length() == 0 || replyStr.charAt(0) != '/')
+                {
+                    throw new Exception("Invalid responce.");
+                }
+                String manufactureID = replyStr.substring(1, 3);
+                if (manufacturer.getIdentification().compareToIgnoreCase(manufactureID) != 0)
+                {
+                    throw new Exception("Manufacturer " + manufacturer.getIdentification() + " expected but " + manufactureID + " found.");
+                }
+                int bitrate = 0;
+                char baudrate = replyStr.charAt(4);
+                switch (baudrate)
+                {
+                    case '0':
+                        bitrate = 300;
+                        break;
+                    case '1':
+                        bitrate = 600;
+                        break;
+                    case '2':
+                        bitrate = 1200;
+                        break;
+                    case '3':
+                        bitrate = 2400;
+                        break;
+                    case '4':
+                        bitrate = 4800;
+                        break;
+                    case '5':
+                        bitrate = 9600;
+                        break;
+                    case '6':
+                        bitrate = 19200;
+                        break;
+                    default:
+                        throw new Exception("Unknown baud rate.");
+                }
+                System.out.println("Bitrate is : " + bitrate);
+                //Send ACK
+                //Send Protocol control character
+                byte controlCharacter = (byte)'2';// "2" HDLC protocol procedure (Mode E)
+                //Send Baudrate character
+                //Mode control character
+                byte ModeControlCharacter = (byte)'2';//"2" //(HDLC protocol procedure) (Binary mode)
+                //Set mode E.
+                byte[] tmp = new byte[] { 0x06, controlCharacter, (byte)baudrate, ModeControlCharacter, 13, 10 };
+                GXSerial serial = (GXSerial) Media;
+                synchronized (Media.getSynchronous())
+                {
+                    if (Trace)
+                    {   
+                        System.out.println("<- " + GXDLMSClient.toHex(tmp));
+                    }
+                    serial.setBaudRate(bitrate);
+                    Media.send(tmp, null);
+                    if (!Media.receive(p))
+                    {
+                        throw new Exception("Invalid meter type.");                    
+                    }
+                }
+                serial.setDataBits(8);
+                serial.setParity(Parity.NONE);
+                serial.setStopBits(StopBits.ONE);
+            }            
+            ConnectionStartTime = java.util.Calendar.getInstance().getTimeInMillis();
+            byte[] reply = null;
+            byte[] data = dlms.SNRMRequest();
+            if (data != null)
+            {
+                reply = readDLMSPacket(data);
+                //Has server accepted client.
+                dlms.parseUAResponse(reply);
+                
+                //Allocate buffer to same size as transmit buffer of the meter.
+                //Size of replyBuff is payload and frame (Bop, EOP, crc).            
+                int size = (int) ((((Number)dlms.getLimits().getMaxInfoTX()).intValue() & 0xFFFFFFFFL) + 40);
+                replyBuff = java.nio.ByteBuffer.allocate(size);
+            }
+            //Generate AARQ request.
+            //Split requests to multible packets if needed.
+            //If password is used all data might not fit to one packet.
+            for (byte[] it : dlms.AARQRequest(null))
+            {            
+                reply = readDLMSPacket(it);
+            }
+            //Parse reply.
+            dlms.parseAAREResponse(reply);
+            //Get challenge Is HLS authentication is used.
+            if (dlms.getIsAuthenticationRequired())
+            {
+                reply = readDLMSPacket(dlms.getApplicationAssociationRequest());
+                dlms.parseApplicationAssociationResponse(reply);
+            }
         }
-        //Generate AARQ request.
-        //Split requests to multible packets if needed.
-        //If password is used all data might not fit to one packet.
-        for (byte[] it : dlms.AARQRequest(null))
-        {
-            reply = readDLMSPacket(it);
-        }
-        //Parse reply.
-        dlms.parseAAREResponse(reply);
     }   
 
     /**
