@@ -152,3 +152,93 @@ public byte[] readDLMSPacket(byte[] data) throws Exception
 }
 
 ```
+
+Using authentication
+
+
+When authentication (Access security) is used server(meter) can allow different rights to  the client.
+Example without authentication (None) only read is allowed.
+Gurux DLMS component supports five different authentication level:
+
++ None
++ Low
++ High
++ HighMD5
++ HighSHA1
+
+In default Authentication level None is used. If other level is used password must also give.
+Used password depends from the meter.
+
+```Java
+client.setAuthentication(Authentication.HighMD5);
+client.setPassword("12345678".getBytes("ASCII"));
+``` 
+
+When authentication is High or above High Level security (HLS) is used.
+After connection is made client must send challenge to the server and server must accept this challenge.
+This is done checking is Is Authentication Required after AARE message is parsed.
+If authentication is required client sends challenge to the server and if everything succeeded
+server returns own challenge that client checks.
+
+```Java
+//Parse reply.
+Client.parseAAREResponse(reply);
+//Get challenge Is HSL authentication is used.
+if (Client.getIsAuthenticationRequired())
+{
+    reply = readDLMSPacket(Client.getApplicationAssociationRequest());
+    Client.parseApplicationAssociationResponse(reply);
+}
+``` 
+
+Writing values
+
+Writing values to the meter is very simple. There are two ways to do this. 
+First is using write -method of GXDLMSClient.
+
+```Java
+readDLMSPacket(Client.write("0.0.1.0.0.255", java.util.Calendar.getInstance().getTime(), DataType.OctetString, ObjectType.CLOCK, 2));
+``` 
+
+
+Note!
+ Data type must be correct or meter returns usually error.
+ If you are reading byte value you can't write UIn16.
+
+It is easy to write simple data types like this. If you want to write complex data types like arrays there
+is also another way to do this. You can Update Object's propery and then write it.
+In this example we want to update listening window of GXDLMSAutoAnswer object.
+
+```Java
+//Read Association view and find GXDLMSAutoAnswer object first.
+GXDLMSAutoAnswer item = Client.Object.findByLN("0.0.2.2.0.255", ObjectType.AUTOANSWER);
+//Window time is from 6am to 8am.
+item.getListeningWindow().add(new AbstractMap.SimpleEntry<GXDateTime, 
+    GXDateTime>(new GXDateTime(-1, -1, -1, 6, -1, -1, -1), 
+    new GXDateTime(-1, -1, -1, 8, -1, -1, -1)));
+readDLMSPacket(Client.write(item, 3));
+``` 
+
+Transport security
+
+DLMS supports tree different transport security. When transport security is used each packet is secured using GMAC security. Security level are:
+* Authentication
+* Encryption
+* AuthenticationEncryption
+
+Using secured messages is easy. Before security can be used following properties must set:
+* Security
+* SystemTitle
+* AuthenticationKey
+* BlockCipherKey
+* FrameCounter
+
+If we want communicate with Gurux DLMS server you just need to set the following settings.
+
+
+```Java
+Client.getCiphering().setSecurity(Security.ENCRYPTION);
+//Default security when using gurux test server.
+Client.getCiphering().setSystemTitle("GRX12345".GetBytes("ASCII");
+
+```
