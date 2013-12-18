@@ -45,7 +45,6 @@ import gurux.dlms.manufacturersettings.*;
 import gurux.dlms.objects.GXDLMSCaptureObject;
 import gurux.dlms.objects.GXDLMSObject;
 import gurux.net.GXNet;
-import gurux.net.NetworkType;
 import gurux.serial.GXSerial;
 import gurux.io.Parity;
 import gurux.io.StopBits;
@@ -408,37 +407,37 @@ public class GXCommunicate
                 serial.setDataBits(8);
                 serial.setParity(Parity.NONE);
                 serial.setStopBits(StopBits.ONE);
-            }            
-            ConnectionStartTime = java.util.Calendar.getInstance().getTimeInMillis();
-            byte[] reply = null;
-            byte[] data = dlms.SNRMRequest();
-            if (data != null)
-            {
-                reply = readDLMSPacket(data);
-                //Has server accepted client.
-                dlms.parseUAResponse(reply);
-                
-                //Allocate buffer to same size as transmit buffer of the meter.
-                //Size of replyBuff is payload and frame (Bop, EOP, crc).            
-                int size = (int) ((((Number)dlms.getLimits().getMaxInfoTX()).intValue() & 0xFFFFFFFFL) + 40);
-                replyBuff = java.nio.ByteBuffer.allocate(size);
-            }
-            //Generate AARQ request.
-            //Split requests to multible packets if needed.
-            //If password is used all data might not fit to one packet.
-            for (byte[] it : dlms.AARQRequest(null))
-            {            
-                reply = readDLMSPacket(it);
-            }
-            //Parse reply.
-            dlms.parseAAREResponse(reply);
-            //Get challenge Is HLS authentication is used.
-            if (dlms.getIsAuthenticationRequired())
-            {
-                reply = readDLMSPacket(dlms.getApplicationAssociationRequest());
-                dlms.parseApplicationAssociationResponse(reply);
             }
         }
+        ConnectionStartTime = java.util.Calendar.getInstance().getTimeInMillis();
+        byte[] reply = null;
+        byte[] data = dlms.SNRMRequest();
+        if (data != null)
+        {
+            reply = readDLMSPacket(data);
+            //Has server accepted client.
+            dlms.parseUAResponse(reply);
+
+            //Allocate buffer to same size as transmit buffer of the meter.
+            //Size of replyBuff is payload and frame (Bop, EOP, crc).            
+            int size = (int) ((((Number)dlms.getLimits().getMaxInfoTX()).intValue() & 0xFFFFFFFFL) + 40);
+            replyBuff = java.nio.ByteBuffer.allocate(size);
+        }
+        //Generate AARQ request.
+        //Split requests to multible packets if needed.
+        //If password is used all data might not fit to one packet.
+        for (byte[] it : dlms.AARQRequest(null))
+        {            
+            reply = readDLMSPacket(it);
+        }
+        //Parse reply.
+        dlms.parseAAREResponse(reply);
+        //Get challenge Is HLS authentication is used.
+        if (dlms.getIsAuthenticationRequired())
+        {
+            reply = readDLMSPacket(dlms.getApplicationAssociationRequest());
+            dlms.parseApplicationAssociationResponse(reply);
+        }        
     }   
 
     /**
