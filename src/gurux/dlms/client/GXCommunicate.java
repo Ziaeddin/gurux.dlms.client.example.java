@@ -137,6 +137,10 @@ public class GXCommunicate
                     System.out.println("<- " + GXDLMSClient.toHex(data));
                 }
                 Media.send(data, null);
+                if (p.getEop() == null)
+                {
+                    p.setCount(1);
+                }
                 succeeded = Media.receive(p);
                 if (!succeeded)
                 {
@@ -409,10 +413,10 @@ public class GXCommunicate
                 serial.setStopBits(StopBits.ONE);
             }
         }
-        ConnectionStartTime = java.util.Calendar.getInstance().getTimeInMillis();
+        ConnectionStartTime = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC")).getTimeInMillis();
         byte[] reply = null;
         byte[] data = dlms.SNRMRequest();
-        if (data != null)
+        if (data.length != 0)
         {
             reply = readDLMSPacket(data);
             //Has server accepted client.

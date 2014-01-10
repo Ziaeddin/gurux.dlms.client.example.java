@@ -334,12 +334,12 @@ public class sampleclient
                 traceLn(logFile, "");             
                 ///////////////////////////////////////////////////////////////////
                 //Read last day.
-                java.util.Calendar start = java.util.Calendar.getInstance();
+                java.util.Calendar start = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC"));
                 start.set(java.util.Calendar.HOUR_OF_DAY, 0); // set hour to midnight 
                 start.set(java.util.Calendar.MINUTE, 0); // set minute in hour 
                 start.set(java.util.Calendar.SECOND, 0); // set second in minute 
                 start.set(java.util.Calendar.MILLISECOND, 0); 
-                java.util.Calendar end = java.util.Calendar.getInstance();
+                java.util.Calendar end = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC"));
                 start.add(java.util.Calendar.DATE, -1);    
                 GXDLMSObject sorted = pg.getSortObject();
                 if (sorted == null)
