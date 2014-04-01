@@ -36,14 +36,16 @@ package gurux.dlms.client;
 
 import gurux.common.IGXMedia;
 import gurux.dlms.GXDLMSClient;
-import gurux.dlms.GXDLMSException;
 import gurux.dlms.enums.Authentication;
 import gurux.dlms.enums.ObjectType;
+import gurux.dlms.internal.GXCommon;
 import gurux.dlms.manufacturersettings.GXManufacturer;
 import gurux.dlms.manufacturersettings.GXManufacturerCollection;
+import gurux.dlms.objects.GXDLMSDemandRegister;
 import gurux.dlms.objects.GXDLMSObject;
 import gurux.dlms.objects.GXDLMSObjectCollection;
 import gurux.dlms.objects.GXDLMSProfileGeneric;
+import gurux.dlms.objects.GXDLMSRegister;
 import gurux.dlms.objects.IGXDLMSBase;
 import gurux.net.GXNet;
 import gurux.net.NetworkType;
@@ -56,6 +58,9 @@ import java.io.BufferedWriter;
 import java.io.FileWriter;
 import java.io.PrintWriter;
 import java.lang.reflect.Array;
+import java.math.BigDecimal;
+import java.text.NumberFormat;
+import java.util.Locale;
 
 public class sampleclient 
 {
@@ -190,7 +195,7 @@ public class sampleclient
                 }
                 else if (item.startsWith("/a="))//Authentication
                 {
-                    auth = Authentication.valueOf(it.trim().replaceFirst("/a=", ""));                    
+                    auth = Authentication.valueOf(it.trim().replaceFirst("/a=", "").toUpperCase());                    
                 }
                 else if (item.startsWith("/pw="))//Password
                 {
@@ -258,12 +263,60 @@ public class sampleclient
             	throw new RuntimeException("Invalid manufacturer.");
             }
             dlms.setObisCodes(man.getObisCodes());
-            com = new GXCommunicate(5000, dlms, man, iec, auth, pw, media);                        
+            com = new GXCommunicate(1500, dlms, man, iec, auth, pw, media);                        
             com.Trace = trace;
             com.initializeConnection();                                
             System.out.println("Reading association view");
             byte[] reply = com.readDataBlock(dlms.getObjectsRequest());
             GXDLMSObjectCollection objects = dlms.parseObjects(reply, true);                                                
+            //Read Profile Generic columns first.
+            GXDLMSObjectCollection profileGenerics = objects.getObjects(ObjectType.PROFILE_GENERIC);
+            for(GXDLMSObject it : profileGenerics)
+            {      
+                traceLn(logFile, "Profile Generic " + it.getName() + " Columns:");
+                GXDLMSProfileGeneric pg = (GXDLMSProfileGeneric) it;
+                //Read columns.
+                try
+                {
+                    GXDLMSObject[] columns = (GXDLMSObject[]) com.readObject(pg, 3);
+                    //Read and update columns scalers.
+                    for (GXDLMSObject it2 : columns)
+                    {
+                        if (it2 instanceof GXDLMSRegister)
+                        {
+                            com.readObject(it2, 3);
+                        }
+                        if (it2 instanceof GXDLMSDemandRegister)
+                        {
+                            com.readObject(it2, 4);
+                        }
+                    }
+                    boolean First = true;
+                    StringBuilder sb = new StringBuilder();
+                    for(GXDLMSObject col : columns)
+                    {
+                        if (!First)
+                        {
+                            sb.append(" | ");
+                        }                        
+                        sb.append(col.getName());
+                        sb.append(" ");
+                        String desc = col.getDescription();
+                        if (desc != null)
+                        {
+                            sb.append(desc);
+                        }
+                        First = false;
+                    }
+                    traceLn(logFile, sb.toString());  
+                }
+                catch(Exception ex)
+                {
+                    traceLn(logFile, "Err! Failed to read columns:" + ex.getMessage());
+                    //Continue reading.
+                }
+            }
+            
             //Read all attributes from all objects.
             for(GXDLMSObject it : objects)
             {
@@ -283,107 +336,140 @@ public class sampleclient
                 }                
                 traceLn(logFile, "-------- Reading " + 
                         it.getClass().getSimpleName() + " " + 
+                        it.getName().toString() + " " + 
                         it.getDescription());
-                for(int pos : ((IGXDLMSBase) it).GetAttributeIndexToRead())
+                for(int pos : ((IGXDLMSBase) it).getAttributeIndexToRead())
                 {
                     try
-                    {
+                    {                        
                         Object val = com.readObject(it, pos);
-                        if (val instanceof Object[])
+                        if (val instanceof byte[])
+                        {
+                            val = GXCommon.toHex((byte[]) val);
+                        }
+                        else if (val instanceof Double)
+                        {
+                            NumberFormat formatter = NumberFormat.getNumberInstance();
+                            val = formatter.format(val);
+                        }
+                        else if (val != null && val.getClass().isArray())
                         {
                             String str = "";
                             for(int pos2 = 0; pos2 != Array.getLength(val); ++pos2)
                             {
-                                if (str.equals(""))
+                                if (!str.equals(""))
                                 {
                                     str += ", ";
                                 }
-                                str += Array.get(val, pos2).toString();
+                                Object tmp = Array.get(val, pos2);
+                                if (tmp instanceof byte[])
+                                {
+                                    str += GXCommon.toHex((byte[]) tmp);
+                                }
+                                else
+                                {
+                                    str += String.valueOf(tmp);
+                                }
                             }
                             val = str;
-                        }
-                        traceLn(logFile, "Index: " + pos + " Value: " + val);                    
+                        }                                                                       
+                        traceLn(logFile, "Index: " + pos + " Value: " + String.valueOf(val));                    
                     }
-                    catch(GXDLMSException ex)
+                    catch(Exception ex)
                     {
-                        //Continue reading if device returns access denied error.
-                        if (ex.getErrorCode() == 3)
-                        {
-                            continue;
-                        }
-                        throw ex;
+                        traceLn(logFile, "Error! Index: " + pos + " " + ex.getMessage());
+                        //Continue reading.
                     }
                 }                
             }            
             ///////////////////////////////////////////////////////////////////
-            //Get profile generics headers and data.
+            //Get data of profile generics.
             Object[] cells;
-            GXDLMSObjectCollection profileGenerics = objects.getObjects(ObjectType.PROFILE_GENERIC);
             for(GXDLMSObject it : profileGenerics)
-            {               
+            {      
                 traceLn(logFile, "-------- Reading " + 
                         it.getClass().getSimpleName() + " " + 
+                        it.getName().toString() + " " + 
                         it.getDescription());
+                
+                long entriesInUse = ((Number)com.readObject(it, 7)).longValue();
+                long entries = ((Number)com.readObject(it, 8)).longValue();
+                traceLn(logFile, "Entries: " + String.valueOf(entriesInUse) + "/" + String.valueOf(entries));
                 GXDLMSProfileGeneric pg = (GXDLMSProfileGeneric) it;
-                //Read columns.
-                GXDLMSObject[] columns = (GXDLMSObject[]) com.readObject(pg, 3);
-                for(GXDLMSObject col : columns)
+                //If there are no columns.
+                if (entriesInUse == 0 || pg.getCaptureObjects().length == 0)
                 {
-                    trace(logFile, col.getLogicalName() + " | ");
+                    continue;
                 }
-                traceLn(logFile, "");             
+                ///////////////////////////////////////////////////////////////////
+                //Read first item.                
+                try
+                {
+                    cells = com.readRowsByEntry(pg, 1, 1);
+                    for(Object rows : cells)
+                    {
+                        for(Object cell : (Object[]) rows)
+                        {
+                            if (cell instanceof byte[])
+                            {
+                                trace(logFile, GXDLMSClient.toHex((byte[]) cell) + " | ");
+                            }
+                            else
+                            {
+                                trace(logFile, cell + " | ");
+                            }
+                        }
+                        traceLn(logFile, "");
+                    }
+                }
+                catch(Exception ex)
+                {
+                    traceLn(logFile, "Error! Failed to read first row: " + ex.getMessage());
+                    //Continue reading if device returns access denied error.                                                
+                }                                    
                 ///////////////////////////////////////////////////////////////////
                 //Read last day.
-                java.util.Calendar start = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC"));
-                start.set(java.util.Calendar.HOUR_OF_DAY, 0); // set hour to midnight 
-                start.set(java.util.Calendar.MINUTE, 0); // set minute in hour 
-                start.set(java.util.Calendar.SECOND, 0); // set second in minute 
-                start.set(java.util.Calendar.MILLISECOND, 0); 
-                java.util.Calendar end = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC"));
-                start.add(java.util.Calendar.DATE, -1);    
-                GXDLMSObject sorted = pg.getSortObject();
-                if (sorted == null)
+                try
                 {
-                    sorted = pg.getCaptureObjects()[0];
-                }
-                cells = com.readRowsByRange(it, sorted, start.getTime(), end.getTime());
-                for(Object rows : cells)
-                {
-                    for(Object cell : (Object[]) rows)
+                    java.util.Calendar start = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC"));
+                    start.set(java.util.Calendar.HOUR_OF_DAY, 0); // set hour to midnight 
+                    start.set(java.util.Calendar.MINUTE, 0); // set minute in hour 
+                    start.set(java.util.Calendar.SECOND, 0); // set second in minute 
+                    start.set(java.util.Calendar.MILLISECOND, 0); 
+                    start.add(java.util.Calendar.DATE, -1);    
+                    
+                    java.util.Calendar end = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC"));                    
+                    end.set(java.util.Calendar.MINUTE, 0); // set minute in hour 
+                    end.set(java.util.Calendar.SECOND, 0); // set second in minute 
+                    end.set(java.util.Calendar.MILLISECOND, 0); 
+
+                    GXDLMSObject sorted = pg.getSortObject();
+                    if (sorted == null)
                     {
-                        if (cell instanceof byte[])
-                        {
-                            System.out.print(GXDLMSClient.toHex((byte[]) cell) + " | ");
-                        }
-                        else
-                        {
-                            trace(logFile, cell + " | ");
-                        }
+                        sorted = pg.getCaptureObjects()[0];
                     }
-                    traceLn(logFile, "");
-                }
-                
-                ///////////////////////////////////////////////////////////////////
-                //Read first item.
-                traceLn(logFile, "First row");
-                int first = 0;
-                int count = 1;
-                cells = com.readRowsByEntry(pg, first, count);
-                for(Object rows : cells)
-                {
-                    for(Object cell : (Object[]) rows)
+                    cells = com.readRowsByRange(it, sorted, start.getTime(), end.getTime());
+                    for(Object rows : cells)
                     {
-                        if (cell instanceof byte[])
+                        for(Object cell : (Object[]) rows)
                         {
-                            trace(logFile, GXDLMSClient.toHex((byte[]) cell) + " | ");
+                            if (cell instanceof byte[])
+                            {
+                                System.out.print(GXDLMSClient.toHex((byte[]) cell) + " | ");
+                            }
+                            else
+                            {
+                                trace(logFile, cell + " | ");
+                            }
                         }
-                        else
-                        {
-                            trace(logFile, cell + " | ");
-                        }
+                        traceLn(logFile, "");
                     }
-                    traceLn(logFile, "");
-                }                
+                }
+                catch(Exception ex)
+                {
+                    traceLn(logFile, "Error! Failed to read last day: " + ex.getMessage());
+                    //Continue reading if device returns access denied error.                                                
+                } 
             }       
         }
         catch(Exception ex)

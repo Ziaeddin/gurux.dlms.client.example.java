@@ -41,6 +41,7 @@ import gurux.dlms.enums.InterfaceType;
 import gurux.dlms.enums.Authentication;
 import gurux.dlms.GXDLMSClient;
 import gurux.dlms.GXDLMSException;
+import gurux.dlms.enums.DataType;
 import gurux.dlms.manufacturersettings.*;
 import gurux.dlms.objects.GXDLMSCaptureObject;
 import gurux.dlms.objects.GXDLMSObject;
@@ -48,7 +49,14 @@ import gurux.net.GXNet;
 import gurux.serial.GXSerial;
 import gurux.io.Parity;
 import gurux.io.StopBits;
+import java.io.BufferedWriter;
 import java.io.ByteArrayOutputStream;
+import java.io.FileWriter;
+import java.io.IOException;
+import java.io.PrintWriter;
+import java.nio.file.Files;
+import java.nio.file.Paths;
+import java.text.SimpleDateFormat;
 import java.util.AbstractMap;
 import java.util.Date;
 import java.util.List;
@@ -62,23 +70,35 @@ public class GXCommunicate
     GXDLMSClient dlms;
     boolean iec;
     java.nio.ByteBuffer replyBuff;
-    int WaitTime = 0;
+    int WaitTime = 5000;
 
     public GXCommunicate(int waitTime, gurux.dlms.GXDLMSClient dlms, GXManufacturer manufacturer, boolean iec, Authentication auth, String pw, IGXMedia media) throws Exception
-    {             
+    {       
+        Files.deleteIfExists(Paths.get("trace.txt"));
         Media = media;
         WaitTime = waitTime;
         this.dlms = dlms;
         this.manufacturer = manufacturer;
         this.iec = iec;
-        dlms.setInterfaceType(manufacturer.getUseIEC47() ? InterfaceType.NET : InterfaceType.GENERAL);
+        boolean useIec47 = manufacturer.getUseIEC47() && media instanceof gurux.net.GXNet;  
+        dlms.setInterfaceType(useIec47 ? InterfaceType.NET : InterfaceType.GENERAL);
         dlms.setUseLogicalNameReferencing(manufacturer.getUseLogicalNameReferencing());
-        Object val = manufacturer.getAuthentication(Authentication.NONE).getClientID();
-        long value = Long.parseLong(val.toString());
-        value = value << 1 | 1;
+        Object val = manufacturer.getAuthentication(auth).getClientID();
+        long value = ((Number) val).longValue();
+        if (!useIec47)
+        {
+            value = value << 1 | 1;    
+        }
         dlms.setClientID(GXManufacturer.convertTo(value, val.getClass()));
         GXServerAddress serv = manufacturer.getServer(HDLCAddressType.DEFAULT);        
-        val = GXManufacturer.countServerAddress(serv.getHDLCAddress(), serv.getPhysicalAddress(), serv.getLogicalAddress());        
+        if (!useIec47)
+        {
+            val = GXManufacturer.countServerAddress(serv.getHDLCAddress(), serv.getPhysicalAddress(), serv.getLogicalAddress());        
+        }
+        else
+        {            
+            val = 1;
+        }
         dlms.setServerID(val);
         dlms.setAuthentication(auth);
         dlms.setPassword(pw.getBytes("ASCII"));        
@@ -103,6 +123,47 @@ public class GXCommunicate
             readDLMSPacket(dlms.disconnectRequest());
             Media.close();
         }
+    }
+    
+    String now()
+    {
+        return new SimpleDateFormat("HH:mm:ss.SSS").format(java.util.Calendar.getInstance().getTime());
+    }
+    
+    void writeTrace(String line)
+    {
+        if (Trace)
+        {   
+            System.out.println(line);
+        }
+        PrintWriter logFile = null;
+        try 
+        {
+            logFile = new PrintWriter(new BufferedWriter(new FileWriter("trace.txt", true)));
+            logFile.println(line);            
+        }
+        catch (IOException ex) 
+        {
+            throw new RuntimeException(ex.getMessage());
+        }
+        finally
+        {
+            if (logFile != null)
+            {
+                logFile.close();
+            }
+        }
+                
+    }
+    
+    public byte[] readDLMSPacket(byte[][] data) throws Exception
+    {
+        byte[] reply = null;
+        for(byte[] it : data)
+        {
+            reply = readDLMSPacket(it);
+        }
+        return reply;
     }
 
     /*
@@ -130,12 +191,10 @@ public class GXCommunicate
         p.setWaitTime(WaitTime);        
         synchronized (Media.getSynchronous())
         {
-            while (!succeeded && pos != 3)
+            while (!succeeded)
             {
-                if (Trace)
-                {   
-                    System.out.println("<- " + GXDLMSClient.toHex(data));
-                }
+                writeTrace("<- " + now() + "\t" + GXDLMSClient.toHex(data));
+             
                 Media.send(data, null);
                 if (p.getEop() == null)
                 {
@@ -145,7 +204,7 @@ public class GXCommunicate
                 if (!succeeded)
                 {
                     //Try to read again...
-                    if (++pos != 3)
+                    if (pos++ != 3)
                     {
                         System.out.println("Data send failed. Try to resend " + pos.toString() + "/3");
                         continue;
@@ -166,32 +225,14 @@ public class GXCommunicate
                 }
             }
         }
-        if (Trace)
-        {
-            System.out.println("-> " + GXDLMSClient.toHex(p.getReply()));
-        }
+        writeTrace("-> " + now() + "\t" + GXDLMSClient.toHex(p.getReply()));
         Object[][] errors = dlms.checkReplyErrors(data, p.getReply());
         if (errors != null)
         {
             throw new GXDLMSException((Integer) errors[0][0]);
         }
         return p.getReply();       
-    }
-    
-    static String toHex(byte[] bytes) 
-    {
-        final char[] hexArray = {'0','1','2','3','4','5','6','7','8','9','A','B','C','D','E','F'};
-        char[] hexChars = new char[bytes.length * 3];
-        int tmp;
-        for (int pos = 0; pos != bytes.length; ++pos) 
-        {
-            tmp = bytes[pos] & 0xFF;
-            hexChars[pos * 3] = hexArray[tmp >> 4];
-            hexChars[pos * 3 + 1] = hexArray[tmp & 0x0F];
-            hexChars[pos * 3 + 2] = ' ';
-        }
-        return new String(hexChars);
-    }
+    }       
     
     /**
      * Opens connection again.
@@ -215,8 +256,7 @@ public class GXCommunicate
      * @return
      * @throws Exception
      */
-    @SuppressWarnings("unused")
-	byte[] readDataBlock(byte[] data) throws Exception
+    byte[] readDataBlock(byte[] data) throws Exception
     {
         if (data.length == 0)
         {
@@ -226,11 +266,6 @@ public class GXCommunicate
         byte[] reply = readDLMSPacket(data);
         ByteArrayOutputStream allData = new ByteArrayOutputStream();
         java.util.Set<RequestTypes> moredata = dlms.getDataFromPacket(reply, allData);
-        //If there is nothing to send.
-        if (allData == null)
-        {
-            return new byte[0];
-        }
         int maxProgress = dlms.getMaxProgressStatus(allData);        
         int lastProgress = 0;
         float progress;
@@ -304,11 +339,15 @@ public class GXCommunicate
      * @param port
      * @throws Exception
      */
+    @SuppressWarnings("SleepWhileHoldingLock")
     void initializeConnection() throws Exception
     {       
         Media.open();
         if (Media instanceof GXSerial)
         {
+            GXSerial serial = (GXSerial) Media;
+            serial.setDtrEnable(true);
+            serial.setRtsEnable(true);
             if (iec)
             {
                 ReceiveParameters<byte[]> p = new ReceiveParameters<byte[]>(byte[].class);
@@ -320,31 +359,23 @@ public class GXCommunicate
                 synchronized (Media.getSynchronous())
                 {
                     data = "/?!\r\n";
-                    if (Trace)
-                    {   
-                        System.out.println("<- " + GXDLMSClient.toHex(data.getBytes("ASCII")));
-                    }
+                    writeTrace("<- " + now() + "\t" + GXDLMSClient.toHex(data.getBytes("ASCII")));
                     Media.send(data, null);
                     if (!Media.receive(p))
                     {
                         throw new Exception("Invalid meter type.");                    
                     }
-                    if (Trace)
-                    {   
-                        System.out.println("-> " + GXDLMSClient.toHex(p.getReply()));
-                    }
+                    writeTrace("->" + now() + "\t" + GXDLMSClient.toHex(p.getReply()));
                     //If echo is used.
                     replyStr = new String(p.getReply());
                     if (data.equals(replyStr))
                     {
+                        p.setReply(null);
                         if (!Media.receive(p))
                         {
                             throw new Exception("Invalid meter type.");                    
                         }
-                        if (Trace)
-                        {   
-                            System.out.println("-> " + GXDLMSClient.toHex(p.getReply()));
-                        }
+                        writeTrace("-> " + now() + "\t" + GXDLMSClient.toHex(p.getReply()));
                         replyStr = new String(p.getReply());
                     }
                 }
@@ -352,7 +383,7 @@ public class GXCommunicate
                 {
                     throw new Exception("Invalid responce.");
                 }
-                String manufactureID = replyStr.substring(1, 3);
+                String manufactureID = replyStr.substring(1, 4);
                 if (manufacturer.getIdentification().compareToIgnoreCase(manufactureID) != 0)
                 {
                     throw new Exception("Manufacturer " + manufacturer.getIdentification() + " expected but " + manufactureID + " found.");
@@ -394,26 +425,30 @@ public class GXCommunicate
                 byte ModeControlCharacter = (byte)'2';//"2" //(HDLC protocol procedure) (Binary mode)
                 //Set mode E.
                 byte[] tmp = new byte[] { 0x06, controlCharacter, (byte)baudrate, ModeControlCharacter, 13, 10 };
-                GXSerial serial = (GXSerial) Media;
+                p.setReply(null);
                 synchronized (Media.getSynchronous())
                 {
-                    if (Trace)
-                    {   
-                        System.out.println("<- " + GXDLMSClient.toHex(tmp));
-                    }
-                    serial.setBaudRate(bitrate);
                     Media.send(tmp, null);
+                    writeTrace("<- " + now() + "\t" + GXDLMSClient.toHex(tmp));
+                    //This sleep is in standard. Do not remove.
+                    Thread.sleep(1000);
+                    serial.setBaudRate(bitrate);
                     if (!Media.receive(p))
                     {
-                        throw new Exception("Invalid meter type.");                    
+                        throw new Exception("Invalid meter type.");
                     }
+                    writeTrace("-> " + now() + "\t" + GXDLMSClient.toHex(p.getReply()));
                 }
+                serial.setDtrEnable(false);
+                serial.setRtsEnable(false);
                 serial.setDataBits(8);
                 serial.setParity(Parity.NONE);
                 serial.setStopBits(StopBits.ONE);
+                serial.setDtrEnable(true);
+                serial.setRtsEnable(true);
             }
         }
-        ConnectionStartTime = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC")).getTimeInMillis();
+        ConnectionStartTime = java.util.Calendar.getInstance().getTimeInMillis();
         byte[] reply = null;
         byte[] data = dlms.SNRMRequest();
         if (data.length != 0)
@@ -439,7 +474,10 @@ public class GXCommunicate
         //Get challenge Is HLS authentication is used.
         if (dlms.getIsAuthenticationRequired())
         {
-            reply = readDLMSPacket(dlms.getApplicationAssociationRequest());
+            for (byte[] it : dlms.getApplicationAssociationRequest())
+            {
+                reply = readDLMSPacket(it);
+            }
             dlms.parseApplicationAssociationResponse(reply);
         }        
     }   
@@ -455,6 +493,11 @@ public class GXCommunicate
     {
         byte[] data = dlms.read(item.getName(), item.getObjectType(), attributeIndex)[0];
         data = readDataBlock(data);
+        //Update data type on read.
+        if (item.getDataType(attributeIndex) == DataType.NONE)
+        {
+            item.setDataType(attributeIndex, dlms.getDLMSDataType(data));
+        }
         return dlms.updateValue(data, item, attributeIndex);
     }
     
@@ -467,8 +510,8 @@ public class GXCommunicate
      */
     public void writeObject(GXDLMSObject item, int attributeIndex) throws Exception
     {
-        byte[] data = dlms.write(item, attributeIndex)[0];
-        readDataBlock(data);       
+        byte[][] data = dlms.write(item, attributeIndex);
+        readDLMSPacket(data);       
     }
 
     /*
