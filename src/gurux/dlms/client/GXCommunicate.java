@@ -67,7 +67,7 @@ public class GXCommunicate
     public boolean Trace = false;
     long ConnectionStartTime;
     GXManufacturer manufacturer;
-    GXDLMSClient dlms;
+    public GXDLMSClient dlms;
     boolean iec;
     java.nio.ByteBuffer replyBuff;
     int WaitTime = 5000;
